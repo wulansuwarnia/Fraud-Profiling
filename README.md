@@ -1,0 +1,200 @@
+# Fraud-Profiling
+ 
+ Background Analysis 
+ We would like to seek demographic of sales person into the probability to Fraud Incident. 
+
+# Libraries
+Call All library which contains all function needed. we'd like to use Logistic regression to seek which variable has significant impacted to fraud incident.
+```{r message=FALSE, warning=FALSE}
+library(gtools)
+library(gmodels)
+library(class)
+library(tidyverse)
+library(caret)
+library(class)
+library(readxl)
+library(ROSE)
+library(rpart)
+library(scoring)
+
+```
+
+
+
+# Prepare the dataset
+
+```{r message=FALSE, warning=FALSE}
+library(readxl)
+fraudatahc <- read_excel("frauddatahcrev.xlsx")
+fraud2 <- fraudatahc[,-1]
+
+#exclude data newmob
+require(Hmisc)
+fraud3 <- subset(fraud2, fraud2$flag_exclusion %nin% "exclude")
+fraud <- fraud3[,-9]
+
+#change the format of fraud flag
+fraud$Fraud_flag <- as.factor(fraud$Fraud_flag)
+
+#see structure your data
+glimpse(fraud)
+
+#checking missing value
+anyNA(fraud)
+```
+
+
+## Proportion of Target Variable - Imbalance Target Variable
+As we see, this data set contains only 1% of positive cases and 99% of negative cases. This is a severely imbalanced data set. It is necessary to balanced data before applying a machine learning algorithm. In this case, the algorithm gets biased toward the majority class and fails to map minority class.
+
+```{r message=FALSE, warning=FALSE}
+#check the target variable from dataset
+table(fraud$Fraud_flag)
+prop.table(table(fraud$Fraud_flag))
+
+```
+
+### Split Dataset into Train and Test
+```{r message=FALSE, warning=FALSE}
+#Divide the dataset itself into Train and Test
+set.seed(433)
+index <- sample(nrow(fraud), nrow(fraud) * 0.8)
+
+train <- fraud[index,]
+test <- fraud[-index,]
+```
+
+### Balance the data with oversampling, Undersampling and Both 
+We’ll use the sampling techniques and try to improve the imbalance sample. 
+Let’s start with oversampling and balance the data.
+
+#### Oversampling method
+In the code below, method over instructs the algorithm to perform over sampling. N refers to number of observations in the resulting balanced set. In this case, originally we had 29.637 negative observations (means non Fraud). So, I instructed this line of code to over sample minority class until it reaches 16.306 and the total data set comprises of 40000 samples.(Just pick random number which expected)
+```{r message=FALSE, warning=FALSE}
+#over sampling (up sampling)
+data_balanced_over <- ovun.sample(Fraud_flag ~ ., data = train, method = "over",N = 40000)$data
+table(data_balanced_over$Fraud_flag)
+```
+
+#### Undersampling method
+Similarly, we can perform undersampling as well. Remember, undersampling is done without replacement. I put double number of fraud incident to make the negative obs falls.
+```{r message=FALSE, warning=FALSE}
+data_balanced_under <- ovun.sample(Fraud_flag ~ ., data = train, method = "under", N = 866, seed = 1)$data
+table(data_balanced_under$Fraud_flag)
+
+```
+#### Oversampling and Undersampling method
+Now the data set is balanced. But, we’ve lost significant information from the sample (non fraud sample). we will do both undersampling and oversampling on this imbalanced data. This can be achieved using method = “both“. In this case, the minority class is oversampled with replacement and majority class is undersampled without replacement.
+
+we put actual number of fraud incident then we will use this data. 
+```{r message=FALSE, warning=FALSE}
+data_balanced_both <- ovun.sample(Fraud_flag ~ ., data = train, method = "both", p=0.5, N=889, seed = 400)$data
+table(data_balanced_both$Fraud_flag)
+
+
+prop.table(table(data_balanced_both$Fraud_flag))
+
+```
+# Variable Selection 
+```{r message=FALSE, warning=FALSE}
+model1 <- glm(Fraud_flag ~ . , fraud, family = "binomial")
+step(model1)
+
+```
+# Modelling
+Model has choosen by AIC number, its like Rsquared which represent relationship between inependent and dependent variables. AIC is a statistical measure of how close the data are to the fitted regression line. It gives us a measure of fit: we'll therefore choose the model with the lowest AIC value, as it helps us minimize residual error in our model.
+
+Since the AIC similar each other, as a business wise, we will take a look all variable.The modelling itself using dataset which already balance both undersampling and upsampling.
+
+we've tried using the real dataset without any sampling methodology then the result is bias since imbalance on target variables (Fraud Incident).
+
+```{r message=FALSE, warning=FALSE}
+model2 <- glm(formula = Fraud_flag ~ Usia_CO + island_MMS + Job_mth + Tk_pendidikan + 
+    mths_mutasi_first + mths_second, family = "binomial", 
+    data = fraud)
+
+summary(model2)
+
+model2 <- glm(formula = Fraud_flag ~ Usia_CO + island_MMS + Job_mth + Tk_pendidikan + 
+    mths_mutasi_first + mths_second, family = "binomial", 
+    data = fraud)
+
+summary(model2)
+
+```
+
+```{r message=FALSE, warning=FALSE}
+# Using data Train 
+data_balanced_both$peluang <- predict(model2, data_balanced_both,type = "response")
+data_balanced_both$predik <- as.factor(ifelse(data_balanced_both$peluang > 0.5, "1", "0"))
+confusionMatrix(data_balanced_both$predik, data_balanced_both$Fraud_flag, positive = "1")
+
+data_balanced_both$Alignedscore <-  round(487.123 + 28.8539*log(data_balanced_both$peluang))
+
+#quartile 
+library(data.table)
+trainbalance <- setDT(data_balanced_both)[, quartile := cut(Alignedscore, quantile(Alignedscore, probs=0:10/10), include.lowest=TRUE, labels=FALSE)]
+
+```
+
+
+```{r message=FALSE, warning=FALSE}
+
+#using data Fraud- all
+fraud$peluang <- predict(model2, fraud,type = "response")
+fraud$predik <- as.factor(ifelse(fraud$peluang > 0.5, "1", "0"))
+confusionMatrix(fraud$predik, fraud$Fraud_flag, positive = "1")
+
+fraud$Alignedscore <-  round(487.123 + 28.8539*log(fraud$peluang))
+library(data.table)
+fraudfin <- setDT(fraud)[, quartile := cut(Alignedscore, quantile(Alignedscore, probs=0:10/10), include.lowest=TRUE, labels=FALSE)]
+
+
+
+```
+
+
+```{r}
+
+```
+## Validation using actual data in August 2019
+
+```{r message=FALSE, warning=FALSE}
+#using data-As of Aug 2019
+
+library(readxl)
+august <- read_excel("agustus19.xlsx")
+august2 <- august[,-1]
+
+#exclude data newmob
+require(Hmisc)
+august3 <- subset(august2, august2$flag_exclusion %nin% "exclude")
+august4 <- na.omit(august2)
+
+#scoring
+august3$peluang <- predict(model2, august3, type="response")
+august3$Alignedscore <-  round(487.123 + 28.8539*log(august3$peluang))
+
+august4$peluang <- predict(model2, august4, type="response")
+august4$Alignedscore <-  round(487.123 + 28.8539*log(august4$peluang))
+
+august4 <- setDT(august3)[, quartile := cut(Alignedscore, quantile(Alignedscore, probs=0:10/10), include.lowest=TRUE, labels=FALSE)]
+
+
+```
+
+#Interpreting the odds
+
+```{r message=FALSE, warning=FALSE}
+exp(model2$coefficients[[2]])
+exp(model2$coefficients[[3]])
+exp(model2$coefficients[[4]])
+exp(model2$coefficients[[5]])
+exp(model2$coefficients[[6]])
+```
+
+
+# Source 
+
+source : https://www.analyticsvidhya.com/blog/2016/03/practical-guide-deal-imbalanced-classification-problems/
+
